@@ -15,6 +15,12 @@ param(
   [switch]$PlanOnly,
   [switch]$SkipTotal,
   [switch]$RebuildCsv,
+  [switch]$NoShrink,
+  [double]$SpreadMultiplier = 0.10,
+  [string]$SpreadOutputSymbol = "",
+  [string]$SpreadOutputDir = "",
+  [int]$SpreadDigits = -1,
+  [switch]$WriteSpreadMonthly,
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$RemainingArgs
 )
@@ -28,17 +34,20 @@ if (-not $OutputDir) {
   $OutputDir = Join-Path $ScriptDir "data"
 }
 
+$Instrument = $Instrument.Trim().ToUpperInvariant().Replace("/", "")
+if (-not $SymbolName) {
+  $SymbolName = "${Instrument}_DUKAS"
+}
+
 $ArgsList = @(
   "--instrument", $Instrument,
+  "--symbol-name", $SymbolName,
   "--from", $From,
   "--to", $To,
   "--output-dir", $OutputDir,
   "--download-workers", "$DownloadWorkers"
 )
 
-if ($SymbolName) {
-  $ArgsList += @("--symbol-name", $SymbolName)
-}
 if ($PriceScale -gt 0) {
   $ArgsList += @("--price-scale", "$PriceScale")
 }
@@ -74,4 +83,42 @@ if ($RemainingArgs) {
 }
 
 python (Join-Path $ScriptDir "dukas_downloader.py") @ArgsList
+if ($LASTEXITCODE -ne 0) {
+  exit $LASTEXITCODE
+}
+
+if ($PlanOnly -or $DownloadOnly -or $NoShrink) {
+  exit 0
+}
+
+$SpreadPct = [int][Math]::Round($SpreadMultiplier * 100)
+if (-not $SpreadOutputSymbol) {
+  $SpreadOutputSymbol = "${SymbolName}_SPREAD$SpreadPct"
+}
+
+$ShrinkArgs = @(
+  "--source-symbol", $SymbolName,
+  "--output-symbol", $SpreadOutputSymbol,
+  "--data-dir", $OutputDir,
+  "--spread-multiplier", "$SpreadMultiplier"
+)
+
+if ($SpreadDigits -ge 0) {
+  $ShrinkArgs += @("--digits", "$SpreadDigits")
+}
+elseif ($Digits -ge 0) {
+  $ShrinkArgs += @("--digits", "$Digits")
+}
+else {
+  $ShrinkArgs += @("--digits", "2")
+}
+
+if ($SpreadOutputDir) {
+  $ShrinkArgs += @("--output-dir", $SpreadOutputDir)
+}
+if ($WriteSpreadMonthly) {
+  $ShrinkArgs += "--write-monthly"
+}
+
+python (Join-Path $ScriptDir "shrink_spread.py") @ShrinkArgs
 exit $LASTEXITCODE

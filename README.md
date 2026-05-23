@@ -2,6 +2,10 @@
 
 Standalone downloader for Dukascopy tick data. It downloads raw hourly `.bi5`
 files incrementally and converts them into MetaTrader 5 tick CSV files.
+The single PowerShell entrypoint calls both Python helpers:
+
+1. `dukas_downloader.py` downloads and converts Dukascopy data.
+2. `shrink_spread.py` creates the reduced-spread CSV variant.
 
 ## Default behavior
 
@@ -15,10 +19,12 @@ defaults to:
 
 - instrument: `XAUUSD`
 - symbol name: `XAUUSD_DUKAS`
+- reduced-spread symbol name: `XAUUSD_DUKAS_SPREAD10`
 - start: `auto`, discovered from remote Dukascopy data
 - end: current complete UTC hour
 - mode: incremental
-- output: `E:\Documents\Trading\dukasDataDownloader\data`
+- output: `E:\Documents\Repos\Trading\dukasDataDownloader\data`
+- spread multiplier: `0.10`
 
 Existing `.bi5` files and `.empty` / `.missing` markers are skipped. Temporary
 HTTP errors are retried and listed in `failed_hours.csv`.
@@ -30,6 +36,9 @@ Download another instrument:
 ```powershell
 .\run_dukascopy_download.ps1 -Instrument EURUSD
 ```
+
+This automatically uses `EURUSD_DUKAS` as the MT5 symbol and
+`EURUSD_DUKAS_SPREAD10` as the reduced-spread output symbol.
 
 Use an explicit MT5 custom symbol name:
 
@@ -67,6 +76,30 @@ Only download raw `.bi5` files:
 .\run_dukascopy_download.ps1 -Instrument XAUUSD -DownloadOnly
 ```
 
+Skip spread reduction:
+
+```powershell
+.\run_dukascopy_download.ps1 -Instrument XAUUSD -NoShrink
+```
+
+Use a different spread multiplier:
+
+```powershell
+.\run_dukascopy_download.ps1 -Instrument XAUUSD -SpreadMultiplier 0.25
+```
+
+Write both monthly adjusted spread files and the combined spread file:
+
+```powershell
+.\run_dukascopy_download.ps1 -Instrument XAUUSD -WriteSpreadMonthly
+```
+
+Use explicit output symbols:
+
+```powershell
+.\run_dukascopy_download.ps1 -Instrument XAUUSD -SymbolName XAUUSD_DUKAS -SpreadOutputSymbol XAUUSD_DUKAS_SPREAD10
+```
+
 ## Output layout
 
 ```text
@@ -77,6 +110,7 @@ data/
   metadata.json
   MT5_IMPORT_NOTES.txt
   failed_hours.csv
+  mt5_ticks_spread10/<SYMBOL>_SPREAD10_ALL_ticks.csv
 ```
 
 ## Price scale presets
@@ -100,6 +134,7 @@ The PowerShell file is a wrapper around:
 
 ```powershell
 python .\dukas_downloader.py --instrument XAUUSD --from auto --to now
+python .\shrink_spread.py --source-symbol XAUUSD_DUKAS
 ```
 
 Useful Python-only flags:
@@ -121,4 +156,6 @@ Useful Python-only flags:
 --refresh-earliest
 --refresh-markers
 --force
+--spread-multiplier N
+--no-shrink
 ```
