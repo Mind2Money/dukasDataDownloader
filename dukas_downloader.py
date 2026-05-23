@@ -31,11 +31,14 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) dukasDataDownloader/1.0"
 PROBE_TIMEOUT_SECONDS = 5
 
 
+DEFAULT_DIGITS = 2
+
+
 PRICE_PRESETS: dict[str, tuple[float, int]] = {
-    "XAUUSD": (1000.0, 3),
-    "XAGUSD": (1000.0, 3),
-    "USOIL": (1000.0, 3),
-    "BRENTCMDUSD": (1000.0, 3),
+    "XAUUSD": (1000.0, DEFAULT_DIGITS),
+    "XAGUSD": (1000.0, DEFAULT_DIGITS),
+    "USOIL": (1000.0, DEFAULT_DIGITS),
+    "BRENTCMDUSD": (1000.0, DEFAULT_DIGITS),
 }
 
 
@@ -83,10 +86,10 @@ def infer_price_settings(instrument: str) -> tuple[float, int]:
     if instrument in PRICE_PRESETS:
         return PRICE_PRESETS[instrument]
     if len(instrument) == 6 and instrument.endswith("JPY"):
-        return 1000.0, 3
+        return 1000.0, DEFAULT_DIGITS
     if len(instrument) == 6:
-        return 100000.0, 5
-    return 100000.0, 5
+        return 100000.0, DEFAULT_DIGITS
+    return 100000.0, DEFAULT_DIGITS
 
 
 def dukascopy_url(instrument: str, hour: dt.datetime) -> str:

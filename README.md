@@ -83,10 +83,10 @@ data/
 
 The script has built-in presets for common instruments:
 
-- `XAUUSD`: scale `1000`, digits `3`
-- `XAGUSD`: scale `1000`, digits `3`
-- normal FX pairs like `EURUSD`: scale `100000`, digits `5`
-- JPY FX pairs like `USDJPY`: scale `1000`, digits `3`
+- `XAUUSD`: scale `1000`, digits `2`
+- `XAGUSD`: scale `1000`, digits `2`
+- normal FX pairs like `EURUSD`: scale `100000`, digits `2`
+- JPY FX pairs like `USDJPY`: scale `1000`, digits `2`
 
 Override when needed:
 
