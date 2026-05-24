@@ -26,6 +26,7 @@ DEFAULT_FROM = "auto"
 DEFAULT_TO = "now"
 DEFAULT_OUTPUT = "data"
 DEFAULT_EARLIEST_SEARCH_FROM = "2003-01-01"
+EARLIEST_PROBE_CACHE_NAME = "earliest_probe_cache.json"
 DUKASCOPY_BASE_URL = "https://datafeed.dukascopy.com/datafeed"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) dukasDataDownloader/1.0"
 PROBE_TIMEOUT_SECONDS = 5
@@ -168,6 +169,104 @@ def month_sample_hours(month: dt.date, end_hour: dt.datetime) -> Iterable[dt.dat
                 yield candidate
 
 
+def earliest_probe_cache_path(output_dir: Path) -> Path:
+    return output_dir / EARLIEST_PROBE_CACHE_NAME
+
+
+def month_cache_key(month: dt.date) -> str:
+    return month.strftime("%Y-%m")
+
+
+def load_earliest_probe_cache(output_dir: Path, instrument: str) -> dict[str, object]:
+    path = earliest_probe_cache_path(output_dir)
+    if not path.exists():
+        return {}
+    try:
+        cache = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(cache, dict) or cache.get("instrument") != instrument:
+        return {}
+
+    month_results = cache.get("month_results")
+    if not isinstance(month_results, dict):
+        month_results = {}
+    cache["month_results"] = {
+        str(key): value for key, value in month_results.items() if isinstance(value, bool)
+    }
+    return cache
+
+
+def write_earliest_probe_cache(output_dir: Path, instrument: str, cache: dict[str, object]) -> None:
+    cache["version"] = 1
+    cache["instrument"] = instrument
+    cache["updated_at_utc"] = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    cache.setdefault("month_results", {})
+
+    path = earliest_probe_cache_path(output_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(cache, indent=2, sort_keys=True), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def cache_earliest_hour(
+    output_dir: Path,
+    instrument: str,
+    search_from: dt.date,
+    earliest_hour: dt.datetime,
+    cache: dict[str, object] | None = None,
+) -> None:
+    probe_cache = cache if cache is not None else load_earliest_probe_cache(output_dir, instrument)
+    probe_cache["earliest_search_from"] = search_from.isoformat()
+    probe_cache["earliest_month"] = f"{earliest_hour.year:04d}-{earliest_hour.month:02d}"
+    probe_cache["earliest_hour"] = earliest_hour.isoformat()
+    write_earliest_probe_cache(output_dir, instrument, probe_cache)
+
+
+def cached_earliest_hour(
+    cache: dict[str, object],
+    search_from: dt.date,
+    end_hour: dt.datetime,
+) -> dt.datetime | None:
+    earliest_text = cache.get("earliest_hour")
+    search_from_text = cache.get("earliest_search_from")
+    if not isinstance(earliest_text, str) or not isinstance(search_from_text, str):
+        return None
+    try:
+        earliest_hour = dt.datetime.fromisoformat(earliest_text)
+        cached_search_from = parse_date(search_from_text)
+    except Exception:
+        return None
+
+    requested_start = dt.datetime.combine(search_from, dt.time.min)
+    if cached_search_from <= search_from and requested_start <= earliest_hour < end_hour:
+        return earliest_hour
+    return None
+
+
+def metadata_earliest_hour(
+    metadata_path: Path,
+    instrument: str,
+    search_from: dt.date,
+    end_hour: dt.datetime,
+) -> dt.datetime | None:
+    if not metadata_path.exists():
+        return None
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if metadata.get("instrument") != instrument or not metadata.get("earliest_hour"):
+            return None
+        earliest_hour = dt.datetime.fromisoformat(metadata["earliest_hour"])
+    except Exception:
+        return None
+
+    requested_start = dt.datetime.combine(search_from, dt.time.min)
+    if requested_start <= earliest_hour < end_hour:
+        return earliest_hour
+    return None
+
+
 def http_has_data(url: str, timeout: int = PROBE_TIMEOUT_SECONDS) -> bool | None:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
@@ -189,20 +288,49 @@ def probe_hour(instrument: str, hour: dt.datetime, probes: dict[dt.datetime, boo
     return result
 
 
-def month_has_data(instrument: str, month: dt.date, end_hour: dt.datetime, probes: dict[dt.datetime, bool | None]) -> bool:
+def month_data_status(instrument: str, month: dt.date, end_hour: dt.datetime, probes: dict[dt.datetime, bool | None]) -> bool | None:
+    saw_unknown = False
     for hour in month_sample_hours(month, end_hour):
         result = probe_hour(instrument, hour, probes)
         if result is True:
             return True
+        if result is None:
+            saw_unknown = True
+    if saw_unknown:
+        return None
     return False
 
 
-def discover_earliest_hour(instrument: str, search_from: dt.date, end_hour: dt.datetime) -> dt.datetime:
+def discover_earliest_hour(
+    instrument: str,
+    search_from: dt.date,
+    end_hour: dt.datetime,
+    output_dir: Path,
+    probe_cache: dict[str, object],
+) -> dt.datetime:
     probes: dict[dt.datetime, bool | None] = {}
+    month_results = probe_cache.setdefault("month_results", {})
+    if not isinstance(month_results, dict):
+        month_results = {}
+        probe_cache["month_results"] = month_results
+
     first_month: dt.date | None = None
     for month in iter_months(search_from, end_hour.date()):
-        print(f"Probe earliest month: {month:%Y-%m}", flush=True)
-        if month_has_data(instrument, month, end_hour, probes):
+        month_key_text = month_cache_key(month)
+        cached_month_result = month_results.get(month_key_text)
+        if isinstance(cached_month_result, bool):
+            print(f"Probe earliest month: {month_key_text} (cached)", flush=True)
+            if cached_month_result:
+                first_month = month
+                break
+            continue
+
+        print(f"Probe earliest month: {month_key_text}", flush=True)
+        status = month_data_status(instrument, month, end_hour, probes)
+        if status is not None:
+            month_results[month_key_text] = status
+            write_earliest_probe_cache(output_dir, instrument, probe_cache)
+        if status is True:
             first_month = month
             break
     if first_month is None:
@@ -218,6 +346,7 @@ def discover_earliest_hour(instrument: str, search_from: dt.date, end_hour: dt.d
                 raise SystemExit(f"No complete hour found for {instrument} before {end_hour}.")
             result = probe_hour(instrument, candidate, probes)
             if result is True:
+                cache_earliest_hour(output_dir, instrument, search_from, candidate, probe_cache)
                 return candidate
     raise SystemExit(f"Could not identify earliest hour for {instrument}.")
 
@@ -225,16 +354,22 @@ def discover_earliest_hour(instrument: str, search_from: dt.date, end_hour: dt.d
 def resolve_start_hour(args: argparse.Namespace, instrument: str, end_hour: dt.datetime) -> dt.datetime:
     value = args.from_value.strip().lower()
     if value == "auto":
-        metadata_path = args.output_dir / "metadata.json"
-        if args.incremental and metadata_path.exists() and not args.refresh_earliest:
-            try:
-                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-                if metadata.get("instrument") == instrument and metadata.get("earliest_hour"):
-                    return dt.datetime.fromisoformat(metadata["earliest_hour"])
-            except Exception:
-                pass
         search_from = parse_date(args.earliest_search_from)
-        return discover_earliest_hour(instrument, search_from, end_hour)
+        probe_cache: dict[str, object] = {}
+        metadata_path = args.output_dir / "metadata.json"
+        if args.incremental and not args.refresh_earliest:
+            probe_cache = load_earliest_probe_cache(args.output_dir, instrument)
+            start_hour = cached_earliest_hour(probe_cache, search_from, end_hour)
+            if start_hour is not None:
+                print(f"Using cached earliest hour: {start_hour} ({earliest_probe_cache_path(args.output_dir)})")
+                return start_hour
+
+            start_hour = metadata_earliest_hour(metadata_path, instrument, search_from, end_hour)
+            if start_hour is not None:
+                print(f"Using cached earliest hour: {start_hour} ({metadata_path})")
+                return start_hour
+
+        return discover_earliest_hour(instrument, search_from, end_hour, args.output_dir, probe_cache)
     return dt.datetime.combine(parse_date(value), dt.time.min)
 
 

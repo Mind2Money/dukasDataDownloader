@@ -28,6 +28,9 @@ defaults to:
 
 Existing `.bi5` files and `.empty` / `.missing` markers are skipped. Temporary
 HTTP errors are retried and listed in `failed_hours.csv`.
+The automatic earliest-data probe is cached in `earliest_probe_cache.json`, so
+later `--from auto` runs do not need to recheck the same remote months unless
+`-RefreshEarliest` / `--refresh-earliest` is used.
 
 ## Common usage
 
@@ -108,6 +111,7 @@ data/
   mt5_ticks/<SYMBOL>_YYYY_MM_ticks.csv
   mt5_ticks/<SYMBOL>_ALL_ticks.csv
   metadata.json
+  earliest_probe_cache.json
   MT5_IMPORT_NOTES.txt
   failed_hours.csv
   mt5_ticks_spread10/<SYMBOL>_SPREAD10_ALL_ticks.csv
