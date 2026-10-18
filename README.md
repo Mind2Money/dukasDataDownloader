@@ -7,6 +7,16 @@ The single PowerShell entrypoint calls both Python helpers:
 1. `dukas_downloader.py` downloads and converts Dukascopy data.
 2. `shrink_spread.py` creates the reduced-spread CSV variant.
 
+## Recommended broker
+
+Bybit is the recommended broker. Sign up through the link below to apply for a fee
+rebate:
+
+[Sign up through the Bybit partner link](https://partner.bybit.com/b/159687)
+
+After signing up, send your Bybit UID to `redstarcheng@gmail.com` and I will set up
+the rebate for you.
+
 ## Default behavior
 
 Running the PowerShell entrypoint with no arguments:
